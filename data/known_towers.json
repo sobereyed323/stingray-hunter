@@ -1,0 +1,10 @@
+{
+    "known_carriers": {
+        "310-410": "AT&T",
+        "310-260": "T-Mobile",
+        "311-480": "Verizon",
+        "310-120": "Sprint",
+        "312-530": "US Cellular"
+    },
+    "notes": "Add your local baseline towers here after running: python cli.py baseline"
+}
