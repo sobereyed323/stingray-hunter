@@ -84,30 +84,35 @@ class Scanner:
         self.device = device
         self.device_index = device.index if device else 0
         
-        # Tool paths (assume in PATH)
-        self.hackrf_sweep_path = "hackrf_sweep"
-        self.kalibrate_path = "kal"  # kalibrate-hackrf binary
+        # Tool paths - use PothosSDR on Windows
+        import os
+        pothos_sweep = r"C:\Program Files\PothosSDR\bin\hackrf_sweep.exe"
+        self.hackrf_sweep_path = pothos_sweep if os.path.exists(pothos_sweep) else "hackrf_sweep"
+        self.kalibrate_path = "kal"  # kalibrate-hackrf binary (optional)
         
         # Scan state
         self.is_scanning = False
         self.last_scan: List[CellTower] = []
+        
+        # Also set up hackrf_transfer path
+        pothos_transfer = r"C:\Program Files\PothosSDR\bin\hackrf_transfer.exe"
+        self.hackrf_transfer_path = pothos_transfer if os.path.exists(pothos_transfer) else "hackrf_transfer"
     
     def sweep_spectrum(
         self, 
         start_mhz: float, 
         end_mhz: float,
-        bin_width_hz: int = 100000
+        bin_width_hz: int = 1000000
     ) -> List[SpectrumSample]:
         """
-        Perform a spectrum sweep in the given range.
-        Returns list of power measurements.
+        Perform a spectrum sweep using hackrf_sweep.
+        Parses CSV output into spectrum samples.
         """
         samples = []
         
         try:
             cmd = [
                 self.hackrf_sweep_path,
-                "-d", str(self.device_index),
                 "-f", f"{int(start_mhz)}:{int(end_mhz)}",
                 "-w", str(bin_width_hz),
                 "-1",  # One sweep only
@@ -240,16 +245,85 @@ class Scanner:
         return towers
     
     def scan_all_bands(self) -> List[CellTower]:
-        """Scan all configured frequency bands."""
+        """Scan all configured frequency bands using spectrum sweep."""
         all_towers = []
         
-        for band_name in ["GSM_850", "GSM_1900"]:
-            if band_name in FREQUENCY_BANDS:
-                towers = self.scan_gsm_band(band_name)
-                all_towers.extend(towers)
+        # Scan cellular bands using spectrum analysis
+        bands_to_scan = [
+            ("GSM_850", 869, 894),      # GSM 850 downlink
+            ("GSM_1900", 1930, 1990),   # GSM 1900/PCS downlink
+            ("LTE_B2", 1930, 1990),     # LTE Band 2
+            ("LTE_B5", 869, 894),       # LTE Band 5
+            ("5G_n71", 617, 652),       # 5G Low-band (600 MHz)
+            ("5G_n41", 2496, 2690),     # 5G Mid-band (2.5 GHz) - T-Mobile
+            ("5G_n77", 3300, 3800),     # 5G Mid-band (3.5 GHz) - C-band
+        ]
+        
+        for band_name, start_mhz, end_mhz in bands_to_scan:
+            towers = self._detect_towers_from_sweep(band_name, start_mhz, end_mhz)
+            all_towers.extend(towers)
         
         self.last_scan = all_towers
         return all_towers
+    
+    def _detect_towers_from_sweep(self, band_name: str, start_mhz: float, end_mhz: float) -> List[CellTower]:
+        """Detect towers by finding strong spectrum peaks."""
+        samples = self.sweep_spectrum(start_mhz, end_mhz)
+        
+        if not samples:
+            return []
+        
+        towers = []
+        
+        # Find peaks (signals significantly above noise floor)
+        if samples:
+            # Calculate noise floor (median power)
+            powers = sorted([s.power_db for s in samples])
+            noise_floor = powers[len(powers) // 2] if powers else -100
+            threshold = noise_floor + 10  # 10dB above noise (lowered for LTE detection)
+            
+            # Group nearby frequencies that are above threshold
+            peaks = []
+            current_peak = []
+            
+            for sample in sorted(samples, key=lambda x: x.frequency_mhz):
+                if sample.power_db > threshold:
+                    if not current_peak or (sample.frequency_mhz - current_peak[-1].frequency_mhz < 1.0):
+                        current_peak.append(sample)
+                    else:
+                        if current_peak:
+                            peaks.append(current_peak)
+                        current_peak = [sample]
+                else:
+                    if current_peak:
+                        peaks.append(current_peak)
+                        current_peak = []
+            
+            if current_peak:
+                peaks.append(current_peak)
+            
+            # Convert peaks to tower detections
+            for peak in peaks:
+                if len(peak) >= 1:  # Require at least 1 sample above threshold (lowered from 3)
+                    # Find strongest signal in peak
+                    strongest = max(peak, key=lambda x: x.power_db)
+                    
+                    # Estimate channel number from frequency
+                    channel = int((strongest.frequency_mhz - start_mhz) * 5)
+                    
+                    tower = CellTower(
+                        mcc="310",  # US
+                        mnc="unknown",
+                        lac="unknown",
+                        cell_id=f"SWEEP-{band_name}-{channel}",
+                        frequency_mhz=strongest.frequency_mhz,
+                        signal_strength=strongest.power_db,
+                        technology=band_name.split('_')[0],
+                        arfcn=channel,
+                    )
+                    towers.append(tower)
+        
+        return towers
     
     def continuous_scan(self) -> Generator[List[CellTower], None, None]:
         """

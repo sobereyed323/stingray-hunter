@@ -92,6 +92,25 @@ class TowerDatabase:
                 ON sightings(timestamp)
             ''')
             
+            # Location measurements for triangulation
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS location_measurements (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tower_id TEXT,
+                    latitude REAL,
+                    longitude REAL,
+                    signal_strength REAL,
+                    timestamp TEXT,
+                    scan_id TEXT,
+                    FOREIGN KEY (tower_id) REFERENCES towers(unique_id)
+                )
+            ''')
+            
+            conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_location_tower 
+                ON location_measurements(tower_id)
+            ''')
+            
             conn.commit()
     
     def record_tower(self, tower: CellTower) -> TowerRecord:
@@ -299,3 +318,37 @@ class TowerDatabase:
                 "suspicious_towers": suspicious,
                 "total_sightings": sightings,
             }
+    
+    def record_location_measurement(
+        self, 
+        tower_id: str, 
+        latitude: float, 
+        longitude: float, 
+        signal_strength: float,
+        scan_id: str = None
+    ) -> None:
+        """Record a signal strength measurement at a specific GPS location."""
+        with sqlite3.connect(self.db_path) as conn:
+            timestamp = datetime.now().isoformat()
+            if not scan_id:
+                scan_id = timestamp
+            
+            conn.execute('''
+                INSERT INTO location_measurements 
+                (tower_id, latitude, longitude, signal_strength, timestamp, scan_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (tower_id, latitude, longitude, signal_strength, timestamp, scan_id))
+            conn.commit()
+    
+    def get_location_measurements(self, tower_id: str) -> List[Dict[str, Any]]:
+        """Get all location measurements for a tower."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            
+            rows = conn.execute('''
+                SELECT * FROM location_measurements 
+                WHERE tower_id = ? 
+                ORDER BY timestamp DESC
+            ''', (tower_id,)).fetchall()
+            
+            return [dict(row) for row in rows]

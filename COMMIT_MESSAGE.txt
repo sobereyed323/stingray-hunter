@@ -1,0 +1,34 @@
+Major update: Add triangulation, AI hunting, and direction finding
+
+Features added:
+- GPS-based triangulation for tower location estimation
+- AI-powered threat assessment and hunting guidance
+- Interactive Google Maps interface for planning scans
+- Dual-HackRF direction finding with bearing calculation
+- Enhanced detection and detailed reporting
+
+New commands:
+- scan-locate: GPS-tagged scanning for triangulation
+- triangulate: Calculate tower location from multiple measurements
+- ai-hunt: AI-guided hunting with optimal scan point recommendations
+- df-scan: Direction finding to get compass bearing to tower
+- df-calibrate: Calibrate DF system with known signals
+- detailed-report: Comprehensive tower analysis
+
+New modules:
+- stingray_hunter/gps.py: GPS coordinate handling and distance calculations
+- stingray_hunter/triangulate.py: Trilateration algorithm
+- stingray_hunter/ai_analyzer.py: Intelligent threat assessment
+- stingray_hunter/direction_finding.py: Phase difference analysis and bearing calculation
+- stingray_hunter/dual_receiver.py: Dual HackRF coordination
+
+Documentation:
+- MAP_GUIDE.md: Google Maps integration guide
+- DF_ANTENNA_GUIDE.md: Direction finding antenna setup
+- DUAL_HACKRF_GUIDE.md: Creative dual-SDR use cases
+- Updated tower_db.py with location_measurements table
+
+Bug fixes:
+- Improved device enumeration for dual HackRF detection
+- Fixed scanner to properly detect towers (now finds 25+ towers)
+- Lowered detection threshold for better sensitivity

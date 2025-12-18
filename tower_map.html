@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Stingray Hunter - Tower Location Map</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        
+        #map { height: 100vh; width: 100%; }
+        
+        .info-panel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            max-width: 350px;
+            z-index: 1000;
+        }
+        
+        .info-panel h2 {
+            color: #1a73e8;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+        
+        .coordinate-display {
+            background: #f1f3f4;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+        
+        .coordinate-display strong {
+            color: #d93025;
+        }
+        
+        button {
+            background: #1a73e8;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px 5px 5px 0;
+        }
+        
+        button:hover {
+            background: #1557b0;
+        }
+        
+        .marker-info {
+            font-size: 12px;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .command-box {
+            background: #2d2d2d;
+            color: #0f0;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            margin-top: 10px;
+            cursor: pointer;
+        }
+        
+        .command-box:hover {
+            background: #3d3d3d;
+        }
+        
+        .legend {
+            margin-top: 10px;
+            font-size: 12px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <div class="info-panel">
+        <h2>🛰️ Stingray Hunter Map</h2>
+        <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
+            Click anywhere on the map to get coordinates for your scan location
+        </p>
+        
+        <div class="coordinate-display" id="coords-display">
+            <strong>Click on map</strong> to get coordinates
+        </div>
+        
+        <button onclick="copyCoordinates()">📋 Copy Coordinates</button>
+        <button onclick="clearMarkers()">🗑️ Clear Markers</button>
+        
+        <div class="command-box" id="command-box" onclick="copyCommand()" title="Click to copy">
+            Click map to generate command
+        </div>
+        
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-color" style="background: #ea4335;"></div>
+                <span>Suspicious Towers</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #34a853;"></div>
+                <span>Your Scan Locations</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #4285f4;"></div>
+                <span>Suggested Test Points</span>
+            </div>
+        </div>
+        
+        <div class="marker-info" id="marker-info">
+            <strong>Tip:</strong> Place 3 markers around a suspicious tower for best triangulation
+        </div>
+    </div>
+
+    <script>
+        let map;
+        let currentInfoWindow = null;
+        let userMarkers = [];
+        let currentCoords = null;
+        
+        function initMap() {
+            // Default to San Francisco area (user can pan to their location)
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: { lat: 37.7749, lng: -122.4194 },
+                zoom: 13,
+                mapTypeId: 'roadmap'
+            });
+            
+            // Add click listener for getting coordinates
+            map.addListener('click', function(event) {
+                addUserMarker(event.latLng);
+            });
+            
+            // Try to get user's current location
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const pos = {
+                            lat: position.coords.latitude,
+                            lng: position.coords.longitude,
+                        };
+                        map.setCenter(pos);
+                        
+                        // Add "You are here" marker
+                        new google.maps.Marker({
+                            position: pos,
+                            map: map,
+                            icon: {
+                                path: google.maps.SymbolPath.CIRCLE,
+                                scale: 8,
+                                fillColor: "#4285f4",
+                                fillOpacity: 1,
+                                strokeColor: "#ffffff",
+                                strokeWeight: 2,
+                            },
+                            title: "Your Current Location"
+                        });
+                    },
+                    () => {
+                        console.log("Geolocation failed");
+                    }
+                );
+            }
+            
+            // Load tower data from database (if available)
+            loadTowerData();
+        }
+        
+        function addUserMarker(latLng) {
+            const lat = latLng.lat();
+            const lng = latLng.lng();
+            
+            currentCoords = { lat, lng };
+            
+            // Add marker
+            const marker = new google.maps.Marker({
+                position: latLng,
+                map: map,
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 10,
+                    fillColor: "#34a853",
+                    fillOpacity: 0.9,
+                    strokeColor: "#ffffff",
+                    strokeWeight: 2,
+                },
+                title: `Scan Point ${userMarkers.length + 1}`,
+                label: {
+                    text: String(userMarkers.length + 1),
+                    color: "white",
+                    fontSize: "12px"
+                }
+            });
+            
+            userMarkers.push(marker);
+            
+            // Update display
+            updateCoordinateDisplay(lat, lng);
+            updateMarkerInfo();
+            
+            // If we have 3 markers, suggest they're ready to triangulate
+            if (userMarkers.length === 3) {
+                document.getElementById('marker-info').innerHTML = 
+                    '<strong style="color: #34a853;">✓ Ready!</strong> You have 3 scan points. Run scans then triangulate!';
+            }
+        }
+        
+        function updateCoordinateDisplay(lat, lng) {
+            document.getElementById('coords-display').innerHTML = 
+                `<strong>Latitude:</strong> ${lat.toFixed(6)}<br>` +
+                `<strong>Longitude:</strong> ${lng.toFixed(6)}`;
+            
+            document.getElementById('command-box').innerHTML = 
+                `python cli.py scan-locate --lat ${lat.toFixed(6)} --lon ${lng.toFixed(6)}`;
+        }
+        
+        function updateMarkerInfo() {
+            if (userMarkers.length === 0) {
+                document.getElementById('marker-info').innerHTML = 
+                    '<strong>Tip:</strong> Place 3 markers around a suspicious tower for best triangulation';
+            } else if (userMarkers.length < 3) {
+                document.getElementById('marker-info').innerHTML = 
+                    `<strong>Markers:</strong> ${userMarkers.length}/3 placed. Add ${3 - userMarkers.length} more for triangulation`;
+            }
+        }
+        
+        function copyCoordinates() {
+            if (!currentCoords) {
+                alert('Click on the map first to select a location');
+                return;
+            }
+            
+            const text = `${currentCoords.lat.toFixed(6)},${currentCoords.lng.toFixed(6)}`;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Coordinates copied to clipboard!');
+            });
+        }
+        
+        function copyCommand() {
+            const commandBox = document.getElementById('command-box');
+            const text = commandBox.innerText;
+            
+            if (text.includes('python')) {
+                navigator.clipboard.writeText(text).then(() => {
+                    commandBox.innerHTML = '✓ Copied to clipboard!';
+                    setTimeout(() => {
+                        if (currentCoords) {
+                            updateCoordinateDisplay(currentCoords.lat, currentCoords.lng);
+                        }
+                    }, 2000);
+                });
+            }
+        }
+        
+        function clearMarkers() {
+            userMarkers.forEach(marker => marker.setMap(null));
+            userMarkers = [];
+            currentCoords = null;
+            document.getElementById('coords-display').innerHTML = 
+                '<strong>Click on map</strong> to get coordinates';
+            document.getElementById('command-box').innerHTML = 
+                'Click map to generate command';
+            updateMarkerInfo();
+        }
+        
+        function loadTowerData() {
+            // This would load triangulated tower locations from your database
+            // For now, we'll show how to add tower markers
+            
+            // Example: Add a suspicious tower marker
+            // addTowerMarker(37.7749, -122.4194, "SWEEP-5G_n41-80", true);
+        }
+        
+        function addTowerMarker(lat, lng, towerId, suspicious) {
+            const color = suspicious ? "#ea4335" : "#fbbc04";
+            
+            const marker = new google.maps.Marker({
+                position: { lat, lng },
+                map: map,
+                icon: {
+                    path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
+                    scale: 5,
+                    fillColor: color,
+                    fillOpacity: 1,
+                    strokeColor: "#ffffff",
+                    strokeWeight: 1,
+                },
+                title: towerId
+            });
+            
+            const infowindow = new google.maps.InfoWindow({
+                content: `<div style="padding: 10px;">
+                    <h3 style="margin: 0 0 10px 0; color: ${color};">
+                        ${suspicious ? '⚠️ Suspicious Tower' : '📡 Tower'}
+                    </h3>
+                    <p style="margin: 5px 0;"><strong>ID:</strong> ${towerId}</p>
+                    <p style="margin: 5px 0;"><strong>Location:</strong> ${lat.toFixed(6)}, ${lng.toFixed(6)}</p>
+                    <button onclick="suggestScanPoints(${lat}, ${lng})" 
+                            style="margin-top: 10px; padding: 8px 15px; background: #1a73e8; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                        Suggest Scan Points
+                    </button>
+                </div>`
+            });
+            
+            marker.addListener('click', () => {
+                if (currentInfoWindow) {
+                    currentInfoWindow.close();
+                }
+                infowindow.open(map, marker);
+                currentInfoWindow = infowindow;
+            });
+        }
+        
+        function suggestScanPoints(towerLat, towerLng) {
+            // Suggest 3 points in a triangle ~100m around the tower
+            const distance = 0.001; // ~100 meters
+            
+            const points = [
+                { lat: towerLat + distance, lng: towerLng },
+                { lat: towerLat - distance * 0.5, lng: towerLng + distance * 0.866 },
+                { lat: towerLat - distance * 0.5, lng: towerLng - distance * 0.866 }
+            ];
+            
+            points.forEach((point, i) => {
+                new google.maps.Marker({
+                    position: point,
+                    map: map,
+                    icon: {
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 8,
+                        fillColor: "#4285f4",
+                        fillOpacity: 0.7,
+                        strokeColor: "#ffffff",
+                        strokeWeight: 2,
+                    },
+                    label: {
+                        text: `S${i+1}`,
+                        color: "white",
+                        fontSize: "10px"
+                    },
+                    title: `Suggested scan point ${i+1}`
+                });
+            });
+            
+            document.getElementById('marker-info').innerHTML = 
+                '<strong style="color: #4285f4;">Blue markers added!</strong> Click them to get coordinates for scanning';
+        }
+    </script>
+    
+    <script async defer
+        src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY_HERE&callback=initMap">
+    </script>
+</body>
+</html>

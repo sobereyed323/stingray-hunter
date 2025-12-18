@@ -39,22 +39,39 @@ class DeviceManager:
     
     def __init__(self):
         self.devices: Dict[int, HackRFDevice] = {}
-        self._hackrf_path = "hackrf_info"  # Assumes in PATH
+        # Try PothosSDR path on Windows, fallback to PATH
+        import os
+        pothos_path = r"C:\Program Files\PothosSDR\bin\hackrf_info.exe"
+        self._hackrf_path = pothos_path if os.path.exists(pothos_path) else "hackrf_info"
     
     def enumerate_devices(self) -> List[HackRFDevice]:
         """
-        Scan for connected HackRF devices.
-        Returns list of detected devices.
+        Enumerate all connected HackRF devices.
+        Returns a list of unique devices found.
         """
         self.devices.clear()
+        seen_serials = set()
+        consecutive_failures = 0
+        max_consecutive_failures = 3  # Stop after 3 consecutive failures
         
-        # Try to detect devices using hackrf_info
-        for device_index in range(10):  # Check up to 10 devices
+        # Try up to 10 device indices
+        for device_index in range(10):
             device = self._probe_device(device_index)
+            
             if device:
-                self.devices[device_index] = device
+                # Only add if we haven't seen this serial before
+                if device.serial not in seen_serials:
+                    self.devices[device_index] = device
+                    seen_serials.add(device.serial)
+                    print(f"Found unique device at index {device_index}: {device.serial}")
+                    consecutive_failures = 0  # Reset failure counter
+                else:
+                    print(f"Skipping duplicate device at index {device_index}: {device.serial}")
             else:
-                break  # No more devices
+                consecutive_failures += 1
+                # Only stop if we have multiple consecutive failures
+                if consecutive_failures >= max_consecutive_failures:
+                    break
         
         return list(self.devices.values())
     
@@ -159,9 +176,12 @@ class DeviceManager:
 # Convenience function for quick device check
 def check_hackrf_available() -> bool:
     """Quick check if any HackRF is connected."""
+    import os
+    pothos_path = r"C:\Program Files\PothosSDR\bin\hackrf_info.exe"
+    hackrf_cmd = pothos_path if os.path.exists(pothos_path) else "hackrf_info"
     try:
         result = subprocess.run(
-            ["hackrf_info"],
+            [hackrf_cmd],
             capture_output=True,
             timeout=5
         )
